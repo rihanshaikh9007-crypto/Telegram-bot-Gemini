@@ -2,6 +2,9 @@ import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import sqlite3
 import random
+import os
+from flask import Flask
+import threading
 
 # Yahan apna bot token dalein
 TOKEN = '8694277322:AAHHDn1OR1cnwkZlpIHv3UwQ8GeMT99sjMQ'
@@ -16,6 +19,17 @@ c = conn.cursor()
 c.execute('''CREATE TABLE IF NOT EXISTS channels (channel_id TEXT, link TEXT)''')
 c.execute('''CREATE TABLE IF NOT EXISTS join_reqs (user_id INTEGER, channel_id TEXT)''')
 conn.commit()
+
+# ================= FLASK WEB SERVER (For Render Free Tier) =================
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running perfectly on Render!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
 # ================= ADMIN PANEL =================
 
@@ -58,13 +72,11 @@ def admin_callbacks(call):
 def process_add_channel(message):
     ch_id = message.text.strip()
     try:
-        # Check karna ki bot channel me admin hai ya nahi
         bot_member = bot.get_chat_member(ch_id, bot.get_me().id)
         if bot_member.status != 'administrator':
             bot.send_message(message.chat.id, "❌ Bot is channel me Admin nahi hai! Pehle bot ko us channel me admin banao phir try karo.")
             return
         
-        # Bot khud join request wala link generate karega
         invite_link = bot.create_chat_invite_link(ch_id, creates_join_request=True)
         
         c.execute("INSERT INTO channels (channel_id, link) VALUES (?, ?)", (ch_id, invite_link.invite_link))
@@ -85,7 +97,6 @@ def process_remove_channel(message):
 def handle_join_request(message: telebot.types.ChatJoinRequest):
     user_id = message.from_user.id
     channel_id = str(message.chat.id)
-    # Database me save karega ki is bande ne request bhej di hai
     c.execute("INSERT INTO join_reqs (user_id, channel_id) VALUES (?, ?)", (user_id, channel_id))
     conn.commit()
 
@@ -100,13 +111,12 @@ def check_user_status(user_id):
     channels = c.fetchall()
     
     if not channels:
-        return True # Koi channel nahi toh key de do
+        return True 
         
     for ch in channels:
         ch_id = ch[0]
         joined = False
         try:
-            # Check if user is member/admin
             status = bot.get_chat_member(ch_id, user_id).status
             if status in ['member', 'administrator', 'creator']:
                 joined = True
@@ -114,10 +124,9 @@ def check_user_status(user_id):
             pass
         
         if not joined:
-            # Check if user has sent join request
             c.execute("SELECT * FROM join_reqs WHERE user_id=? AND channel_id=?", (user_id, ch_id))
             if not c.fetchone():
-                return False # Na join kiya hai, na request bheji
+                return False 
     return True
 
 def send_force_sub(chat_id, user_id):
@@ -125,7 +134,6 @@ def send_force_sub(chat_id, user_id):
         send_key(chat_id)
         return
 
-    # User ke liye message aur image
     image_url = "https://files.catbox.moe/wcfmqd.jpg"
     caption = (
         "𝗛ᴇʟʟᴏ 𝗨ꜱᴇʀ 👻 𝐁𝐎𝐓\n\n"
@@ -164,5 +172,10 @@ def send_key(chat_id):
     )
     bot.send_message(chat_id, text, disable_web_page_preview=True)
 
-print("Bot is running...")
-bot.infinity_polling(allowed_updates=telebot.util.update_types)
+# ================= START SYSTEM =================
+if __name__ == "__main__":
+    # Web server ko alag thread me chalana taaki Render port detect kar le
+    threading.Thread(target=run_web).start()
+    
+    print("Bot is running...")
+    bot.infinity_polling(allowed_updates=telebot.util.update_types)
